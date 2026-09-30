@@ -2,7 +2,7 @@
 
 Configurador visual de fondos animados con grano (WebGL2), pensado para exportar directo a Webflow.
 
-**Demo:** _(https://cancheter.github.io/Granient-app/)_
+**Demo:** _(agregá acá el link de GitHub Pages)_
 
 ## Qué hace
 
@@ -11,6 +11,16 @@ Configurador visual de fondos animados con grano (WebGL2), pensado para exportar
 - Color de fondo propio, resplandor, giro, pulso y deformación de flujo.
 - Presets: veta con corazón blanco, sol naciente, estrella, lava, aurora.
 - Exporta un snippet autocontenido (sin dependencias) y la configuración en JSON.
+- **Copiar ajustes / Copiar link / Pegar ajustes** para pasar un set entre personas.
+- **Favoritos** guardados en el navegador, con opción de copiarlos todos y pasarlos a otra persona.
+
+## Compartir un set con otra persona
+
+- **Copiar link** (solo en la URL publicada): genera un link que abre el studio con esos ajustes exactos.
+- **Copiar ajustes**: copia el JSON. La otra persona lo pega con **Pegar ajustes**.
+- **Copiar todos los favoritos**: copia tu colección. Al pegarla con **Pegar ajustes**, se suman a los favoritos de la otra persona.
+
+Los favoritos viven en el `localStorage` de cada navegador: no se sincronizan solos entre personas ni dispositivos.
 
 ## Usar el snippet en Webflow
 
