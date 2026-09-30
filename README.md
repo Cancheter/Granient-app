@@ -2,7 +2,7 @@
 
 Configurador visual de fondos animados con grano (WebGL2), pensado para exportar directo a Webflow.
 
-**Demo:** _(agregá acá el link de GitHub Pages)_
+**Demo:** _(https://cancheter.github.io/Granient-app/)_
 
 ## Qué hace
 
