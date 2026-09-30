@@ -330,6 +330,7 @@ function createGrainient(el, cfg, opts) {
     "uniform vec3 uStopColor[8];\n" +
     "uniform vec2 uStopRange[8];\n" +
     "uniform float uStopGrain[8];\n" +
+    "uniform float uStopBlend[8];\n" +
     "uniform int uCount;\n" +
     "out vec4 fragColor;\n" +
     "vec2 hash(vec2 p){p=vec2(dot(p,vec2(2127.1,81.17)),dot(p,vec2(1269.5,283.37)));return fract(sin(p)*43758.5453);}\n" +
@@ -340,8 +341,12 @@ function createGrainient(el, cfg, opts) {
     "  col=uStopColor[0];gr=uStopGrain[0];\n" +
     "  for(int i=1;i<8;i++){\n" +
     "    if(i>=uCount)break;\n" +
-    "    float lo=uStopRange[i-1].y-soft;\n" +
-    "    float hi=uStopRange[i].x+soft;\n" +
+    "    float a=uStopRange[i-1].y;\n" +
+    "    float b=uStopRange[i].x;\n" +
+    "    float m=(a+b)*0.5;\n" +
+    "    float fb=(uStopBlend[i-1]+uStopBlend[i])*0.5;\n" +
+    "    float lo=min(a,m-fb)-soft;\n" +
+    "    float hi=max(b,m+fb)+soft;\n" +
     "    if(hi<=lo)hi=lo+0.0001;\n" +
     "    float k=smoothstep(lo,hi,v);\n" +
     "    col=mix(col,uStopColor[i],k);\n" +
@@ -484,16 +489,18 @@ function createGrainient(el, cfg, opts) {
     gl.uniform2f(U('uPos'), c.posX || 0, c.posY || 0);
     gl.uniform2f(U('uSize'), c.sizeX || 1, c.sizeY || 1);
     gl.uniform3fv(U('uBg'), hexToRgb(c.bg));
-    var s = sortedStops(c), cols = new Float32Array(MAX * 3), rng = new Float32Array(MAX * 2), grn = new Float32Array(MAX);
+    var s = sortedStops(c), cols = new Float32Array(MAX * 3), rng = new Float32Array(MAX * 2), grn = new Float32Array(MAX), bln = new Float32Array(MAX);
     for (var i = 0; i < s.length; i++) {
       var rgb = hexToRgb(s[i].color), w = (s[i].width || 0) / 2;
       cols[i * 3] = rgb[0]; cols[i * 3 + 1] = rgb[1]; cols[i * 3 + 2] = rgb[2];
       rng[i * 2] = s[i].pos - w; rng[i * 2 + 1] = s[i].pos + w;
       grn[i] = s[i].grain == null ? 1 : s[i].grain;
+      bln[i] = s[i].blend == null ? 0.02 : s[i].blend;
     }
     gl.uniform3fv(U('uStopColor[0]'), cols);
     gl.uniform2fv(U('uStopRange[0]'), rng);
     gl.uniform1fv(U('uStopGrain[0]'), grn);
+    gl.uniform1fv(U('uStopBlend[0]'), bln);
     gl.uniform1i(U('uCount'), Math.max(1, s.length));
   }
 
@@ -549,7 +556,7 @@ function createGrainient(el, cfg, opts) {
   };
   function P(stops, extra) {
     return Object.assign({}, BASE, extra || {}, {
-      stops: stops.map(function (s) { return { color: s[0], pos: s[1], width: s[2], grain: s[3] == null ? 1 : s[3] }; })
+      stops: stops.map(function (s) { return { color: s[0], pos: s[1], width: s[2], grain: s[3] == null ? 1 : s[3], blend: s[4] == null ? 0.02 : s[4] }; })
     });
   }
   var PRESETS = {
@@ -636,7 +643,8 @@ function createGrainient(el, cfg, opts) {
         color: s.color.toLowerCase(),
         pos: isFinite(+s.pos) ? +s.pos : 0,
         width: isFinite(+s.width) ? Math.max(0, +s.width) : 0,
-        grain: isFinite(+s.grain) && s.grain !== null && s.grain !== undefined ? Math.max(0, +s.grain) : 1
+        grain: isFinite(+s.grain) && s.grain !== null && s.grain !== undefined ? Math.max(0, +s.grain) : 1,
+        blend: isFinite(+s.blend) && s.blend !== null && s.blend !== undefined ? Math.max(0, +s.blend) : 0.02
       };
     });
     if (out.stops.length < MIN_STOPS) out.stops = clone(PRESETS[DEFAULT_NAME].stops);
@@ -799,9 +807,15 @@ function createGrainient(el, cfg, opts) {
     var first = s[0].pos - s[0].width / 2, last = s[s.length - 1].pos + s[s.length - 1].width / 2;
     function pct(x) { return (Math.max(POS_MIN, Math.min(POS_MAX, x)) - POS_MIN) / (POS_MAX - POS_MIN) * 100; } // rampa visible completa
     parts.push(state.bg + ' 0%', state.bg + ' ' + pct(first - fade).toFixed(1) + '%');
-    s.forEach(function (x) {
-      parts.push(x.color + ' ' + pct(x.pos - x.width / 2).toFixed(1) + '%', x.color + ' ' + pct(x.pos + x.width / 2).toFixed(1) + '%');
-    });
+    // Misma lógica que el shader: la transición entre dos colores mide como mínimo su fusión
+    parts.push(s[0].color + ' ' + pct(first).toFixed(1) + '%');
+    for (var k = 1; k < s.length; k++) {
+      var a = s[k - 1].pos + s[k - 1].width / 2, b = s[k].pos - s[k].width / 2, m = (a + b) / 2;
+      var f = ((s[k - 1].blend == null ? 0.02 : s[k - 1].blend) + (s[k].blend == null ? 0.02 : s[k].blend)) / 2;
+      var lo = Math.min(a, m - f) - state.softness, hi = Math.max(b, m + f) + state.softness;
+      parts.push(s[k - 1].color + ' ' + pct(lo).toFixed(1) + '%', s[k].color + ' ' + pct(hi).toFixed(1) + '%');
+    }
+    parts.push(s[s.length - 1].color + ' ' + pct(last).toFixed(1) + '%');
     parts.push(state.bg + ' ' + pct(last + fade).toFixed(1) + '%', state.bg + ' 100%');
     rampEl.style.background = 'linear-gradient(90deg,' + parts.join(',') + ')';
   }
@@ -992,7 +1006,7 @@ function createGrainient(el, cfg, opts) {
     cg.querySelector('h2').innerHTML = '<span>Colores</span><span class="count">' + state.stops.length + '/' + MAX_STOPS + '</span>';
     var hint = document.createElement('p'); hint.className = 'hint';
     hint.innerHTML = state.shape === 'band'
-      ? 'Como paradas de gradiente en Figma: <b>posición</b> ubica el color, <b>ancho</b> define cuánto ocupa sólido.'
+      ? 'Como paradas de gradiente en Figma: <b>posición</b> ubica el color, <b>ancho</b> define cuánto ocupa sólido y <b>fusión</b> cuán suave se mezcla con los vecinos.'
       : 'En Círculo y Lava, la posición 0 es el <b>centro</b> de la forma y los valores mayores van hacia afuera.';
     cg.appendChild(hint);
     rampEl = document.createElement('div'); rampEl.className = 'ramp'; cg.appendChild(rampEl);
@@ -1049,7 +1063,8 @@ function createGrainient(el, cfg, opts) {
       var posIn = posWrap.querySelector('input'); posIn.classList.add('pos-range');
       posInputs.push({ input: posIn, stop: stop });
       box.appendChild(posWrap);
-      box.appendChild(slider('Ancho', 0, 3, 0.005, stop.width, function (v) { stop.width = v; commit(); }));
+      box.appendChild(slider('Ancho (zona sólida)', 0, 3, 0.005, stop.width, function (v) { stop.width = v; commit(); }));
+      box.appendChild(slider('Fusión con los vecinos', 0, 0.6, 0.005, stop.blend, function (v) { stop.blend = v; commit(); }));
       box.appendChild(slider('Grano de este color', 0, 3, 0.05, stop.grain, function (v) { stop.grain = v; commit(); }));
       cg.appendChild(box);
     });
@@ -1078,7 +1093,7 @@ function createGrainient(el, cfg, opts) {
       var s = state.stops.slice().sort(function (a, b) { return a.pos - b.pos; });
       var at = s[s.length - 1].pos + 0.08, gap = 0;
       for (var k = 1; k < s.length; k++) { var g = s[k].pos - s[k - 1].pos; if (g > gap && g > 0.05) { gap = g; at = (s[k].pos + s[k - 1].pos) / 2; } }
-      state.stops.push({ color: '#ffffff', pos: +at.toFixed(3), width: 0, grain: 1 });
+      state.stops.push({ color: '#ffffff', pos: +at.toFixed(3), width: 0, grain: 1, blend: 0.02 });
       buildPanel(); commit();
     });
     cg.appendChild(add);

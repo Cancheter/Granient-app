@@ -7,7 +7,7 @@ Configurador visual de fondos animados con grano (WebGL2), pensado para exportar
 ## Qué hace
 
 - Tres formas: **Banda**, **Círculo** (con elipse y puntas de estrella) y **Lava** (metaballs).
-- Rampa de hasta 8 colores con posición, ancho y grano independiente por color.
+- Rampa de hasta 8 colores con posición, ancho (zona sólida), fusión con los vecinos y grano, independientes por color.
 - Color de fondo propio, resplandor, giro, pulso y deformación de flujo.
 - Presets: veta con corazón blanco, sol naciente, estrella, lava, aurora.
 - Exporta un snippet autocontenido (sin dependencias) y la configuración en JSON.
