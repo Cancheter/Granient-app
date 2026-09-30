@@ -13,7 +13,9 @@ Configurador visual de fondos animados con grano (WebGL2), pensado para exportar
 - Exporta un snippet autocontenido (sin dependencias) y la configuración en JSON.
 - **Copiar ajustes / Copiar link / Pegar ajustes** para pasar un set entre personas.
 - **Deshacer / rehacer** (⌘Z / ⇧⌘Z, o Ctrl+Z / Ctrl+Y).
-- **Reubicar colores** arrastrando la manija ⋮⋮ o con las flechas de cada color.
+- **Reubicar colores** arrastrando la manija ⋮⋮ (con vista previa de dónde cae) o con las flechas de cada color.
+- **Invertir rampa** (cambia el resultado) e **Invertir lista** (solo cambia el orden en el panel).
+- La **posición** de cada color queda acotada entre sus vecinos: nunca cambia de lugar por accidente.
 - **Favoritos** guardados en el navegador, con opción de copiarlos todos y pasarlos a otra persona.
 
 ## Compartir un set con otra persona
