@@ -199,6 +199,23 @@
   .fav-name:hover span { color: var(--accent); }
   .icon-btn.armed { color: #fff; background: #c0392b; border-color: #c0392b; }
   [hidden] { display: none !important; }
+  .btn.icon-only { padding: 6px 8px; display: inline-grid; place-items: center; }
+  .grip {
+    width: 18px; height: 32px; flex: none; display: grid; place-items: center;
+    color: var(--muted); cursor: grab; border-radius: 6px; touch-action: none;
+  }
+  .grip:hover { color: var(--text); background: var(--panel); }
+  .grip:active { cursor: grabbing; }
+  .move { display: flex; flex-direction: column; gap: 2px; flex: none; }
+  .move button {
+    width: 24px; height: 15px; padding: 0; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--panel); color: var(--muted); cursor: pointer; display: grid; place-items: center;
+  }
+  .move button:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+  .move button:disabled { opacity: .3; cursor: not-allowed; }
+  .stop.dragging { opacity: .4; }
+  .stop.drop-before { box-shadow: 0 -3px 0 var(--accent); }
+  .stop.drop-after { box-shadow: 0 3px 0 var(--accent); }
 
   @media (max-width: 820px) {
     .main { grid-template-columns: 1fr; grid-template-rows: 46vh 1fr; }
@@ -231,6 +248,8 @@
           <button type="button" data-ar="9/16" aria-pressed="false">9:16</button>
         </div>
         <div class="spacer"></div>
+        <button class="btn ghost icon-only" id="btnUndo" type="button" title="Deshacer (⌘Z / Ctrl+Z)" aria-label="Deshacer" disabled><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+        <button class="btn ghost icon-only" id="btnRedo" type="button" title="Rehacer (⇧⌘Z / Ctrl+Y)" aria-label="Rehacer" disabled><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
         <button class="btn ghost" id="btnReset" type="button">Restablecer</button>
       </div>
       <div class="preview-wrap"><div class="preview" id="preview"></div></div>
@@ -663,8 +682,50 @@ function createGrainient(el, cfg, opts) {
   var preview = document.getElementById('preview');
   var engine = createGrainient(preview, state, { respectReducedMotion: false });
 
+  // Historial para deshacer / rehacer. Agrupa los cambios de un mismo gesto
+  // (arrastrar un slider genera decenas de eventos) en un solo paso.
+  var undoStack = [], redoStack = [], settled = JSON.stringify(state), groupTimer = 0, restoring = false;
+  var HISTORY_MAX = 100;
+  function record() {
+    if (restoring) return;
+    if (!groupTimer) {
+      undoStack.push(settled);
+      if (undoStack.length > HISTORY_MAX) undoStack.shift();
+      redoStack = [];
+    }
+    clearTimeout(groupTimer);
+    groupTimer = setTimeout(settle, 450);
+    updateHistoryBtns();
+  }
+  function settle() {
+    clearTimeout(groupTimer); groupTimer = 0;
+    var now = JSON.stringify(state);
+    if (undoStack.length && undoStack[undoStack.length - 1] === now) undoStack.pop(); // sin cambio real
+    settled = now; updateHistoryBtns();
+  }
+  function restore(json) {
+    restoring = true; state = sanitize(JSON.parse(json)); settled = json;
+    buildPanel(); commit(); restoring = false; updateHistoryBtns();
+  }
+  function undo() {
+    if (groupTimer) settle();
+    if (!undoStack.length) return;
+    redoStack.push(settled); restore(undoStack.pop()); toast('Deshecho');
+  }
+  function redo() {
+    if (groupTimer) settle();
+    if (!redoStack.length) return;
+    undoStack.push(settled); restore(redoStack.pop()); toast('Rehecho');
+  }
+  function updateHistoryBtns() {
+    var u = document.getElementById('btnUndo'), r = document.getElementById('btnRedo');
+    if (u) u.disabled = !undoStack.length && !groupTimer;
+    if (r) r.disabled = !redoStack.length;
+  }
+
   var saveTimer = 0;
   function commit() {
+    record();
     engine.update(state);
     renderRamp();
     clearTimeout(saveTimer);
@@ -732,6 +793,48 @@ function createGrainient(el, cfg, opts) {
     var h = document.createElement('h2'); h.textContent = title; g.appendChild(h);
     if (hint) { var p = document.createElement('p'); p.className = 'hint'; p.textContent = hint; g.appendChild(p); }
     return g;
+  }
+
+  // Reubicar un color: cambia el orden y reasigna las posiciones existentes,
+  // así el color movido ocupa el lugar del otro en la rampa (como en Figma).
+  function moveStop(from, to) {
+    if (to < 0 || to >= state.stops.length || from === to) return;
+    var s = state.stops.slice().sort(function (a, b) { return a.pos - b.pos; });
+    var positions = s.map(function (x) { return x.pos; });
+    var item = s.splice(from, 1)[0]; s.splice(to, 0, item);
+    s.forEach(function (x, k) { x.pos = positions[k]; });
+    state.stops = s; buildPanel(); commit();
+  }
+  var drag = null;
+  function startDrag(e, box, index) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    drag = { from: index, to: index, box: box };
+    box.classList.add('dragging');
+    document.addEventListener('pointermove', onDragMove);
+    document.addEventListener('pointerup', endDrag, { once: true });
+    document.addEventListener('pointercancel', endDrag, { once: true });
+  }
+  function onDragMove(e) {
+    if (!drag) return;
+    var boxes = [].slice.call(panel.querySelectorAll('.stop[data-index]'));
+    boxes.forEach(function (b) { b.classList.remove('drop-before', 'drop-after'); });
+    var target = drag.from;
+    for (var k = 0; k < boxes.length; k++) {
+      var r = boxes[k].getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) { target = k; boxes[k].classList.add('drop-before'); break; }
+      if (k === boxes.length - 1) { target = k + 1; boxes[k].classList.add('drop-after'); }
+    }
+    drag.to = target > drag.from ? target - 1 : target;
+    var pr = panel.getBoundingClientRect();
+    if (e.clientY < pr.top + 40) panel.scrollTop -= 12; else if (e.clientY > pr.bottom - 40) panel.scrollTop += 12;
+  }
+  function endDrag() {
+    document.removeEventListener('pointermove', onDragMove);
+    if (!drag) return;
+    var d = drag; drag = null;
+    [].forEach.call(panel.querySelectorAll('.stop'), function (b) { b.classList.remove('dragging', 'drop-before', 'drop-after'); });
+    if (d.to !== d.from) moveStop(d.from, d.to);
   }
 
   function buildPanel() {
@@ -825,9 +928,24 @@ function createGrainient(el, cfg, opts) {
     cg.appendChild(hint);
     rampEl = document.createElement('div'); rampEl.className = 'ramp'; cg.appendChild(rampEl);
 
+    // Las tarjetas siguen el orden real de la rampa (por posición)
+    state.stops.sort(function (a, b) { return a.pos - b.pos; });
     state.stops.forEach(function (stop, i) {
-      var box = document.createElement('div'); box.className = 'stop';
+      var box = document.createElement('div'); box.className = 'stop'; box.dataset.index = i;
       var head = colorField(stop.color, 'Color ' + (i + 1), function (v) { stop.color = v; commit(); });
+      var grip = document.createElement('span'); grip.className = 'grip'; grip.title = 'Arrastrar para reubicar';
+      grip.setAttribute('aria-hidden', 'true');
+      grip.innerHTML = '<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></svg>';
+      grip.addEventListener('pointerdown', function (e) { startDrag(e, box, i); });
+      head.insertBefore(grip, head.firstChild);
+      var mv = document.createElement('div'); mv.className = 'move';
+      var up = document.createElement('button'); up.type = 'button'; up.title = 'Subir'; up.setAttribute('aria-label', 'Mover color ' + (i + 1) + ' antes');
+      up.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m6 15 6-6 6 6"/></svg>';
+      up.disabled = i === 0; up.addEventListener('click', function () { moveStop(i, i - 1); });
+      var dn = document.createElement('button'); dn.type = 'button'; dn.title = 'Bajar'; dn.setAttribute('aria-label', 'Mover color ' + (i + 1) + ' después');
+      dn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m6 9 6 6 6-6"/></svg>';
+      dn.disabled = i === state.stops.length - 1; dn.addEventListener('click', function () { moveStop(i, i + 1); });
+      mv.appendChild(up); mv.appendChild(dn); head.appendChild(mv);
       head.appendChild(iconBtn(ICON_DUP, 'Duplicar color', state.stops.length >= MAX_STOPS, function () {
         var n = clone(stop); n.pos = +(stop.pos + 0.05).toFixed(3); state.stops.splice(i + 1, 0, n); buildPanel(); commit();
       }));
@@ -888,6 +1006,19 @@ function createGrainient(el, cfg, opts) {
   var paused = false, btnPause = document.getElementById('btnPause');
   btnPause.addEventListener('click', function () { paused = !paused; engine.setPaused(paused); btnPause.textContent = paused ? 'Reanudar' : 'Pausar'; });
   document.getElementById('btnReset').addEventListener('click', function () { state = clone(PRESETS[DEFAULT_NAME]); buildPanel(); commit(); });
+  document.getElementById('btnUndo').addEventListener('click', undo);
+  document.getElementById('btnRedo').addEventListener('click', redo);
+  document.addEventListener('keydown', function (e) {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    var k = e.key.toLowerCase();
+    if (k !== 'z' && k !== 'y') return;
+    var t = e.target;
+    // En campos de texto, dejamos el deshacer nativo del navegador
+    if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|)$/.test(t.type)))) return;
+    if (document.querySelector('dialog[open]')) return;
+    e.preventDefault();
+    if (k === 'y' || e.shiftKey) redo(); else undo();
+  });
 
   var arGroup = document.getElementById('aspect');
   arGroup.addEventListener('click', function (e) {
