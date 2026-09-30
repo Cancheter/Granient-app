@@ -199,6 +199,9 @@
   .fav-name:hover span { color: var(--accent); }
   .icon-btn.armed { color: #fff; background: #c0392b; border-color: #c0392b; }
   [hidden] { display: none !important; }
+  .seg.chips { flex-wrap: wrap; }
+  .seg.chips button { flex: 1 1 auto; padding: 7px 6px; font-size: 12px; }
+  .fav-rename { flex: 1; min-width: 0; font-family: var(--sans); }
   .btn.icon-only { padding: 6px 8px; display: inline-grid; place-items: center; }
   .grip {
     width: 18px; height: 32px; flex: none; display: grid; place-items: center;
@@ -311,7 +314,8 @@
 function createGrainient(el, cfg, opts) {
   opts = opts || {};
   var MAX = 8;
-  var SHAPES = { band: 0, circle: 1, lava: 2 };
+  var SHAPES = { band: 0, circle: 1, lava: 2, rays: 3 };
+  var TEXTURES = { none: 0, gradient: 1, vignette: 2, clouds: 3, paper: 4, halftone: 5, lines: 6 };
   var VERT = '#version 300 es\nin vec2 position;\nvoid main(){gl_Position=vec4(position,0.0,1.0);}\n';
   var FRAG = "#version 300 es\n" +
     "precision highp float;\n" +
@@ -332,10 +336,50 @@ function createGrainient(el, cfg, opts) {
     "uniform float uStopGrain[8];\n" +
     "uniform float uStopBlend[8];\n" +
     "uniform int uCount;\n" +
+    "uniform vec2 uBeamOrigin;\n" +
+    "uniform float uBeamAngle,uBeamSpread,uBeamSoft,uBeamLength,uBeamAmbient;\n" +
+    "uniform float uRayCount,uRaySpacing,uRayJitter,uRayWidth,uRayWidthVar,uRaySeed,uRayStrength;\n" +
+    "uniform float uLightSway,uLightFlicker,uLightSweep,uLightSpeed;\n" +
+    "uniform vec3 uBg2;\n" +
+    "uniform int uBgTex;\n" +
+    "uniform float uBgTexAmount,uBgTexScale;\n" +
     "out vec4 fragColor;\n" +
     "vec2 hash(vec2 p){p=vec2(dot(p,vec2(2127.1,81.17)),dot(p,vec2(1269.5,283.37)));return fract(sin(p)*43758.5453);}\n" +
     "float noise(vec2 p){vec2 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);float n=mix(mix(dot(-1.0+2.0*hash(i),f),dot(-1.0+2.0*hash(i+vec2(1.0,0.0)),f-vec2(1.0,0.0)),u.x),mix(dot(-1.0+2.0*hash(i+vec2(0.0,1.0)),f-vec2(0.0,1.0)),dot(-1.0+2.0*hash(i+vec2(1.0,1.0)),f-vec2(1.0,1.0)),u.x),u.y);return 0.5+0.5*n;}\n" +
     "float h1(float n){return fract(sin(n*127.1)*43758.5453);}\n" +
+    "float fbm(vec2 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.0+vec2(13.1,7.7);a*=0.5;}return v/0.9375;}\n" +
+    "vec3 bgTexture(vec2 uv,vec2 pa){\n" +
+    "  if(uBgTex==0)return uBg;\n" +
+    "  float sc=max(uBgTexScale,0.05);float k=0.0;\n" +
+    "  if(uBgTex==1){k=1.0-smoothstep(0.0,1.0,uv.y);}\n" +
+    "  else if(uBgTex==2){k=smoothstep(0.2,0.95,length(pa)*1.1);}\n" +
+    "  else if(uBgTex==3){k=fbm(pa*sc*2.5+vec2(iTime*0.015,iTime*0.01));k=smoothstep(0.25,0.8,k);}\n" +
+    "  else if(uBgTex==4){float n=noise(vec2(pa.x*sc*70.0,pa.y*sc*5.0))*0.7+noise(pa*sc*160.0)*0.3;k=smoothstep(0.4,0.85,n);}\n" +
+    "  else if(uBgTex==5){vec2 g=pa*sc*45.0;vec2 c=fract(g)-0.5;float r=0.12+0.25*uBgTexAmount;k=1.0-smoothstep(r-0.04,r,length(c));return mix(uBg,uBg2,k);}\n" +
+    "  else if(uBgTex==6){float s=0.5+0.5*sin(gl_FragCoord.y*3.14159/max(sc*2.0,0.5));k=pow(s,3.0);}\n" +
+    "  return mix(uBg,uBg2,clamp(k*uBgTexAmount,0.0,1.0));\n" +
+    "}\n" +
+    "float lightRays(vec2 p,float ratio){\n" +
+    "  float t=iTime*uLightSpeed;\n" +
+    "  vec2 o=uBeamOrigin*vec2(0.5*ratio,0.5)/max(uZoom,0.001);\n" +
+    "  vec2 d=p-o;float dist=length(d);float a=atan(d.y,d.x);\n" +
+    "  float ba=radians(uBeamAngle+uLightSweep*sin(t*0.4));\n" +
+    "  float rel=mod(a-ba+3.14159265,6.2831853)-3.14159265;\n" +
+    "  float half_=radians(max(uBeamSpread,0.1))*0.5;\n" +
+    "  float cone=1.0-smoothstep(half_*(1.0-clamp(uBeamSoft,0.0,1.0)),half_,abs(rel));\n" +
+    "  float sp=radians(uRaySpacing);float R=0.0;int n=int(uRayCount+0.5);\n" +
+    "  for(int i=0;i<24;i++){\n" +
+    "    if(i>=n)break;\n" +
+    "    float fi=float(i)+uRaySeed*17.0;\n" +
+    "    float c=(float(i)-(float(n)-1.0)*0.5)*sp+(h1(fi+1.0)-0.5)*sp*uRayJitter;\n" +
+    "    c+=sin(t*(0.6+0.8*h1(fi+9.0))+float(i)*1.7)*uLightSway*sp*0.5;\n" +
+    "    float w=radians(max(uRayWidth,0.01))*max(0.15,1.0+(h1(fi+3.0)-0.5)*2.0*uRayWidthVar);\n" +
+    "    float b=(0.55+0.45*h1(fi+5.0))*(1.0-uLightFlicker*(0.5+0.5*sin(t*(2.0+3.0*h1(fi+7.0))+float(i)*2.3)));\n" +
+    "    float x=(rel-c)/w;R+=b*exp(-x*x);\n" +
+    "  }\n" +
+    "  float fall=exp(-dist/max(uBeamLength,0.01));\n" +
+    "  return clamp(fall*cone*(uBeamAmbient+uRayStrength*R),0.0,1.0);\n" +
+    "}\n" +
     "vec2 rot(vec2 p,float a){float s=sin(a),c=cos(a);return vec2(p.x*c-p.y*s,p.x*s+p.y*c);}\n" +
     "void ramp(float v,float soft,out vec3 col,out float cov,out float gr){\n" +
     "  col=uStopColor[0];gr=uStopGrain[0];\n" +
@@ -387,6 +431,8 @@ function createGrainient(el, cfg, opts) {
     "      r/=(1.0+uStarDepth*s);\n" +
     "    }\n" +
     "    v=r*uSpread;\n" +
+    "  } else if(uShape==3){\n" +
+    "    v=(1.0-lightRays(p,ratio)*pulse)*uSpread;\n" +
     "  } else {\n" +
     "    vec2 q=p/max(uSize,vec2(0.01));\n" +
     "    float f=0.0;\n" +
@@ -406,7 +452,8 @@ function createGrainient(el, cfg, opts) {
     "  }\n" +
     "  vec3 rc;float cov;float gr;\n" +
     "  ramp(v,uSoftness,rc,cov,gr);\n" +
-    "  vec3 col=mix(uBg,rc,cov);\n" +
+    "  vec3 bgc=bgTexture(uv,(uv-0.5)*vec2(ratio,1.0));\n" +
+    "  vec3 col=mix(bgc,rc,cov);\n" +
     "  float gAmt=mix(uBgGrain,gr,cov);\n" +
     "  if(uGlow>0.0){\n" +
     "    vec3 gc;float gcov;float gg;\n" +
@@ -478,7 +525,11 @@ function createGrainient(el, cfg, opts) {
     uPulseAmount: 'pulseAmount', uPulseSpeed: 'pulseSpeed', uBlobCount: 'blobCount', uBlobSize: 'blobSize',
     uBlobArea: 'blobArea', uBlobSpeed: 'blobSpeed', uGlow: 'glow', uGlowRadius: 'glowRadius',
     uGrainAmount: 'grainAmount', uGrainScale: 'grainScale', uContrast: 'contrast', uGamma: 'gamma',
-    uSaturation: 'saturation', uBgGrain: 'bgGrain'
+    uSaturation: 'saturation', uBgGrain: 'bgGrain',
+    uBeamAngle: 'beamAngle', uBeamSpread: 'beamSpread', uBeamSoft: 'beamSoft', uBeamLength: 'beamLength', uBeamAmbient: 'beamAmbient',
+    uRaySpacing: 'raySpacing', uRayJitter: 'rayJitter', uRayWidth: 'rayWidth', uRayWidthVar: 'rayWidthVar', uRaySeed: 'raySeed', uRayStrength: 'rayStrength',
+    uLightSway: 'lightSway', uLightFlicker: 'lightFlicker', uLightSweep: 'lightSweep', uLightSpeed: 'lightSpeed',
+    uBgTexAmount: 'bgTexAmount', uBgTexScale: 'bgTexScale'
   };
 
   function apply(c) {
@@ -489,6 +540,10 @@ function createGrainient(el, cfg, opts) {
     gl.uniform2f(U('uPos'), c.posX || 0, c.posY || 0);
     gl.uniform2f(U('uSize'), c.sizeX || 1, c.sizeY || 1);
     gl.uniform3fv(U('uBg'), hexToRgb(c.bg));
+    gl.uniform3fv(U('uBg2'), hexToRgb(c.bg2 || c.bg));
+    gl.uniform1i(U('uBgTex'), TEXTURES[c.bgTexture] || 0);
+    gl.uniform2f(U('uBeamOrigin'), c.beamX == null ? -1.25 : c.beamX, c.beamY == null ? 1.25 : c.beamY);
+    gl.uniform1f(U('uRayCount'), Math.round(c.rayCount || 0));
     var s = sortedStops(c), cols = new Float32Array(MAX * 3), rng = new Float32Array(MAX * 2), grn = new Float32Array(MAX), bln = new Float32Array(MAX);
     for (var i = 0; i < s.length; i++) {
       var rgb = hexToRgb(s[i].color), w = (s[i].width || 0) / 2;
@@ -552,7 +607,11 @@ function createGrainient(el, cfg, opts) {
     rotationAmount: 210, noiseScale: 2.45, spin: 0, pulseAmount: 0, pulseSpeed: 0.5,
     glow: 0, glowRadius: 0.25,
     grainAmount: 0.03, grainScale: 1.3, grainAnimated: false,
-    contrast: 1, gamma: 1, saturation: 1
+    contrast: 1, gamma: 1, saturation: 1,
+    bg2: '#060508', bgTexture: 'none', bgTexAmount: 0.6, bgTexScale: 1,
+    beamX: -1.25, beamY: 1.25, beamAngle: -38, beamSpread: 60, beamSoft: 0.55, beamLength: 1.6, beamAmbient: 0.3,
+    rayCount: 9, raySpacing: 5.5, rayJitter: 0.7, rayWidth: 1.3, rayWidthVar: 0.7, raySeed: 3, rayStrength: 0.85,
+    lightSway: 0.4, lightFlicker: 0.25, lightSweep: 4, lightSpeed: 0.6
   };
   function P(stops, extra) {
     return Object.assign({}, BASE, extra || {}, {
@@ -569,14 +628,40 @@ function createGrainient(el, cfg, opts) {
     'Lava': P([['#ffd166', 0, .5, 0.3], ['#f77f00', .38, .02], ['#d62828', .47, 0]],
       { shape: 'lava', bg: '#1a0b12', edgeFade: .06, softness: .02, warpStrength: .5, rotationAmount: 20, glow: .4, glowRadius: .15 }),
     'Aurora': P([['#1b3a8c', .35, .05], ['#2bd4a8', .48, .02], ['#f5f0c8', .54, 0, 0.3], ['#d6378a', .62, .04]],
-      { bg: '#0b0d1a', softness: .06, timeSpeed: .25 })
+      { bg: '#0b0d1a', softness: .06, timeSpeed: .25 }),
+    'Luz entrante · cálida': P([['#fff6e0', 0, .02, .3, .12], ['#ffc983', .3, 0, 1, .15], ['#a4532e', .62, 0, 1.2, .2]],
+      { shape: 'rays', bg: '#16131b', bg2: '#060508', bgTexture: 'vignette', bgTexAmount: .8, edgeFade: .35,
+        warpStrength: .15, rotationAmount: 0, glow: .25, glowRadius: .2 }),
+    'Luz entrante · fría': P([['#f2fbff', 0, .02, .3, .12], ['#8fd0ff', .3, 0, 1, .15], ['#2a4a7a', .62, 0, 1.2, .2]],
+      { shape: 'rays', bg: '#0b1018', bg2: '#1a2436', bgTexture: 'clouds', bgTexAmount: .5, bgTexScale: 1.2, edgeFade: .35,
+        beamX: 1.25, beamY: 1.3, beamAngle: -135, beamSpread: 50, rayCount: 13, raySpacing: 3.6, rayWidth: 0.9, raySeed: 8,
+        lightFlicker: .1, lightSway: .3, warpStrength: .15, rotationAmount: 0, glow: .3, glowRadius: .25 })
   };
   var DEFAULT_NAME = 'Veta roja · corazón blanco';
 
-  var ALL = ['band', 'circle', 'lava'];
+  var ALL = ['band', 'circle', 'lava', 'rays'];
+  var TEX = ['none', 'gradient', 'vignette', 'clouds', 'paper', 'halftone', 'lines'];
   var SCHEMA = [
     { title: 'Forma', items: [
-      { k: 'shape', type: 'seg', options: [['band', 'Banda'], ['circle', 'Círculo'], ['lava', 'Lava']] },
+      { k: 'shape', type: 'seg', options: [['band', 'Banda'], ['circle', 'Círculo'], ['lava', 'Lava'], ['rays', 'Rayos']] },
+      { sub: 'Fuente de luz', when: ['rays'] },
+      { k: 'beamX', label: 'Origen X (±1 = borde, más allá = fuera de pantalla)', min: -2.5, max: 2.5, step: 0.01, when: ['rays'] },
+      { k: 'beamY', label: 'Origen Y', min: -2.5, max: 2.5, step: 0.01, when: ['rays'] },
+      { k: 'beamAngle', label: 'Dirección (°)', min: -180, max: 180, step: 1, when: ['rays'] },
+      { k: 'beamSpread', label: 'Caudal (apertura del cono, °)', min: 2, max: 170, step: 1, when: ['rays'] },
+      { k: 'beamSoft', label: 'Borde del cono', min: 0, max: 1, step: 0.01, when: ['rays'] },
+      { k: 'beamLength', label: 'Alcance', min: 0.2, max: 6, step: 0.01, when: ['rays'] },
+      { k: 'beamAmbient', label: 'Luz de relleno del cono', min: 0, max: 1, step: 0.01, when: ['rays'] },
+      { sub: 'Rayos', when: ['rays'] },
+      { k: 'rayCount', label: 'Cantidad', min: 0, max: 24, step: 1, when: ['rays'] },
+      { k: 'raySpacing', label: 'Distancia entre rayos (°)', min: 0.5, max: 20, step: 0.1, when: ['rays'] },
+      { k: 'rayWidth', label: 'Grosor (°)', min: 0.1, max: 8, step: 0.05, when: ['rays'] },
+      { k: 'rayStrength', label: 'Intensidad', min: 0, max: 2, step: 0.01, when: ['rays'] },
+      { sub: 'Naturalidad', when: ['rays'] },
+      { k: 'rayJitter', label: 'Desorden de posición', min: 0, max: 1.5, step: 0.01, when: ['rays'] },
+      { k: 'rayWidthVar', label: 'Variación de grosor', min: 0, max: 1, step: 0.01, when: ['rays'] },
+      { k: 'raySeed', label: 'Variante (reparte los rayos distinto)', min: 0, max: 30, step: 1, when: ['rays'] },
+      { sub: 'Forma general', when: ['rays'] },
       { k: 'blendAngle', label: 'Ángulo de la banda', min: -180, max: 180, step: 1, when: ['band'] },
       { k: 'sizeX', label: 'Ancho', min: 0.1, max: 4, step: 0.01, when: ['circle', 'lava'] },
       { k: 'sizeY', label: 'Alto', min: 0.1, max: 4, step: 0.01, when: ['circle', 'lava'] },
@@ -596,6 +681,7 @@ function createGrainient(el, cfg, opts) {
       { k: 'posY', label: 'Posición Y', min: -1.5, max: 1.5, step: 0.01 }
     ]},
     { title: 'Animación', items: [
+      { type: 'apply', label: 'Estilo de movimiento', options: [["Calma", {"timeSpeed": 0.15, "warpStrength": 0.6, "warpFrequency": 2.5, "warpSpeed": 1, "rotationAmount": 60, "pulseAmount": 0, "spin": 0}], ["Fluido", {"timeSpeed": 0.3, "warpStrength": 1.85, "warpFrequency": 3.8, "warpSpeed": 2, "rotationAmount": 210, "pulseAmount": 0, "spin": 0}], ["Ondas", {"timeSpeed": 0.35, "warpStrength": 3, "warpFrequency": 6, "warpSpeed": 3, "rotationAmount": 120, "pulseAmount": 0, "spin": 0}], ["Respira", {"timeSpeed": 0.2, "warpStrength": 0.8, "warpFrequency": 3, "warpSpeed": 1.5, "rotationAmount": 80, "pulseAmount": 0.08, "pulseSpeed": 0.25, "spin": 0}], ["Turbulento", {"timeSpeed": 0.6, "warpStrength": 4, "warpFrequency": 9, "warpSpeed": 4, "rotationAmount": 480, "pulseAmount": 0, "spin": 0}]] },
       { k: 'timeSpeed', label: 'Velocidad general', min: 0, max: 2, step: 0.01 },
       { sub: 'Flujo' },
       { k: 'warpStrength', label: 'Fuerza de deformación', min: 0, max: 5, step: 0.01 },
@@ -607,7 +693,13 @@ function createGrainient(el, cfg, opts) {
       { sub: 'Giro y pulso' },
       { k: 'spin', label: 'Giro (grados/seg)', min: -90, max: 90, step: 1 },
       { k: 'pulseAmount', label: 'Pulso (respiración)', min: 0, max: 0.5, step: 0.005 },
-      { k: 'pulseSpeed', label: 'Ritmo del pulso', min: 0, max: 3, step: 0.01 }
+      { k: 'pulseSpeed', label: 'Ritmo del pulso', min: 0, max: 3, step: 0.01 },
+      { sub: 'Luz', when: ['rays'] },
+      { type: 'apply', label: 'Estilo de luz', options: [["Quieta", {"lightSway": 0, "lightFlicker": 0, "lightSweep": 0}], ["Suave", {"lightSway": 0.4, "lightFlicker": 0.15, "lightSweep": 3, "lightSpeed": 0.5}], ["Titileo", {"lightSway": 0.15, "lightFlicker": 0.6, "lightSweep": 0, "lightSpeed": 1.2}], ["Barrido", {"lightSway": 0.2, "lightFlicker": 0.1, "lightSweep": 12, "lightSpeed": 0.4}], ["Viva", {"lightSway": 0.7, "lightFlicker": 0.4, "lightSweep": 6, "lightSpeed": 0.9}]], when: ['rays'] },
+      { k: 'lightSpeed', label: 'Velocidad de la luz', min: 0, max: 3, step: 0.01, when: ['rays'] },
+      { k: 'lightSway', label: 'Balanceo de rayos', min: 0, max: 1.5, step: 0.01, when: ['rays'] },
+      { k: 'lightFlicker', label: 'Titileo', min: 0, max: 1, step: 0.01, when: ['rays'] },
+      { k: 'lightSweep', label: 'Barrido del cono (°)', min: 0, max: 45, step: 0.5, when: ['rays'] }
     ]},
     { title: 'Resplandor', items: [
       { k: 'glow', label: 'Intensidad', min: 0, max: 2, step: 0.01 },
@@ -635,7 +727,8 @@ function createGrainient(el, cfg, opts) {
       if (typeof d === 'boolean') out[k] = !!c[k];
       else if (typeof d === 'number') out[k] = isFinite(+c[k]) ? +c[k] : d;
       else if (k === 'shape') out[k] = ALL.indexOf(c[k]) >= 0 ? c[k] : d;
-      else if (k === 'bg') out[k] = validHex(c[k]) ? c[k].toLowerCase() : d;
+      else if (k === 'bg' || k === 'bg2') out[k] = validHex(c[k]) ? c[k].toLowerCase() : d;
+      else if (k === 'bgTexture') out[k] = TEX.indexOf(c[k]) >= 0 ? c[k] : d;
     }
     var stops = (c && Array.isArray(c.stops)) ? c.stops : [];
     out.stops = stops.filter(function (s) { return s && validHex(s.color); }).slice(0, MAX_STOPS).map(function (s) {
@@ -920,6 +1013,24 @@ function createGrainient(el, cfg, opts) {
     setTimeout(function () { d.box.classList.remove('lifted', 'settling'); d.boxes.forEach(function (b) { b.classList.remove('shifting'); }); }, 180);
   }
 
+  function startRename(f, item, load) {
+    var input = document.createElement('input'); input.className = 'hex fav-rename'; input.value = f.name; input.maxLength = 60;
+    input.setAttribute('aria-label', 'Nuevo nombre');
+    item.replaceChild(input, load); input.focus(); input.select();
+    var done = false;
+    function finish(save) {
+      if (done) return; done = true;
+      var v = input.value.trim();
+      if (save && v && v !== f.name) { f.name = v; saveFavs(favs); toast('Renombrado: ' + v); }
+      buildPanel();
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
   function buildPanel() {
     var scroll = panel.scrollTop;
     panel.innerHTML = '';
@@ -964,7 +1075,7 @@ function createGrainient(el, cfg, opts) {
         load.firstChild.textContent = f.name;
         var d = new Date(f.savedAt);
         load.lastChild.textContent = (isNaN(d) ? '' : d.toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }) + ' · ') +
-          ({ band: 'Banda', circle: 'Círculo', lava: 'Lava' }[f.config.shape] || '');
+          ({ band: 'Banda', circle: 'Círculo', lava: 'Lava', rays: 'Rayos' }[f.config.shape] || '');
         load.title = 'Cargar "' + f.name + '"';
         load.addEventListener('click', function () { state = sanitize(f.config); buildPanel(); commit(); toast('Cargado: ' + f.name); });
         var upd = iconBtn('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
@@ -979,7 +1090,10 @@ function createGrainient(el, cfg, opts) {
           }
           favs.splice(i, 1); saveFavs(favs); buildPanel(); toast('Favorito borrado');
         });
-        item.appendChild(sw); item.appendChild(load); item.appendChild(upd); item.appendChild(del);
+        var ren = iconBtn('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+          'Renombrar', false, function () { startRename(f, item, load); });
+        load.addEventListener('dblclick', function (e) { e.preventDefault(); startRename(f, item, load); });
+        item.appendChild(sw); item.appendChild(load); item.appendChild(ren); item.appendChild(upd); item.appendChild(del);
         list.appendChild(item);
       });
       fg.appendChild(list);
@@ -998,6 +1112,21 @@ function createGrainient(el, cfg, opts) {
     var bgBox = document.createElement('div'); bgBox.className = 'stop';
     bgBox.appendChild(colorField(state.bg, 'Color de fondo', function (v) { state.bg = v; commit(); }));
     bgBox.appendChild(slider('Grano del fondo', 0, 3, 0.05, state.bgGrain, function (v) { state.bgGrain = v; commit(); }));
+    var texRow = document.createElement('div'); texRow.className = 'ctrl';
+    texRow.innerHTML = '<div class="ctrl-row"><label for="bgTexSel">Textura</label></div>';
+    var texSel = document.createElement('select'); texSel.className = 'preset'; texSel.id = 'bgTexSel';
+    [['none', 'Lisa'], ['gradient', 'Degradé vertical'], ['vignette', 'Viñeta'], ['clouds', 'Nubes'], ['paper', 'Papel / fibras'], ['halftone', 'Tramado de puntos'], ['lines', 'Líneas']]
+      .forEach(function (t) { var o = document.createElement('option'); o.value = t[0]; o.textContent = t[1]; texSel.appendChild(o); });
+    texSel.value = state.bgTexture;
+    texSel.addEventListener('change', function () { beginStep(); state.bgTexture = texSel.value; buildPanel(); commitStep(); });
+    texRow.appendChild(texSel); bgBox.appendChild(texRow);
+    if (state.bgTexture !== 'none') {
+      var c2 = colorField(state.bg2, 'Color secundario de la textura', function (v) { state.bg2 = v; commit(); });
+      c2.style.marginTop = '10px'; bgBox.appendChild(c2);
+      bgBox.appendChild(slider('Intensidad de la textura', 0, 1, 0.01, state.bgTexAmount, function (v) { state.bgTexAmount = v; commit(); }));
+      if (['clouds', 'paper', 'halftone', 'lines'].indexOf(state.bgTexture) >= 0)
+        bgBox.appendChild(slider('Escala de la textura', 0.2, 4, 0.01, state.bgTexScale, function (v) { state.bgTexScale = v; commit(); }));
+    }
     bg.appendChild(bgBox);
     panel.appendChild(bg);
 
@@ -1110,10 +1239,23 @@ function createGrainient(el, cfg, opts) {
           it.options.forEach(function (o) {
             var b = document.createElement('button'); b.type = 'button'; b.textContent = o[1];
             b.setAttribute('aria-pressed', state[it.k] === o[0] ? 'true' : 'false');
-            b.addEventListener('click', function () { if (state[it.k] === o[0]) return; state[it.k] = o[0]; buildPanel(); commit(); });
+            b.addEventListener('click', function () { if (state[it.k] === o[0]) return; beginStep(); state[it.k] = o[0]; buildPanel(); commitStep(); });
             seg.appendChild(b);
           });
           g.appendChild(seg);
+        } else if (it.type === 'apply') {
+          var lbl = document.createElement('div'); lbl.className = 'ctrl-row'; lbl.innerHTML = '<label></label>';
+          lbl.firstChild.textContent = it.label; g.appendChild(lbl);
+          var aseg = document.createElement('div'); aseg.className = 'seg wide ctrl chips'; aseg.setAttribute('role', 'group'); aseg.setAttribute('aria-label', it.label);
+          it.options.forEach(function (o) {
+            var patch = o[1];
+            var on = Object.keys(patch).every(function (k) { return Math.abs((+state[k] || 0) - patch[k]) < 1e-6; });
+            var b = document.createElement('button'); b.type = 'button'; b.textContent = o[0];
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            b.addEventListener('click', function () { beginStep(); Object.assign(state, patch); buildPanel(); commitStep(); toast(it.label + ': ' + o[0]); });
+            aseg.appendChild(b);
+          });
+          g.appendChild(aseg);
         } else if (it.type === 'bool') {
           var lab = document.createElement('label'); lab.className = 'check ctrl';
           var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!state[it.k];

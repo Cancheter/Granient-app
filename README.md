@@ -6,17 +6,19 @@ Configurador visual de fondos animados con grano (WebGL2), pensado para exportar
 
 ## Qué hace
 
-- Tres formas: **Banda**, **Círculo** (con elipse y puntas de estrella) y **Lava** (metaballs).
+- Cuatro formas: **Banda**, **Círculo** (con elipse y puntas de estrella), **Lava** (metaballs) y **Rayos** (luz que entra desde fuera de pantalla, con cono, rayos irregulares y animación de luz).
+- **Texturas de fondo**: degradé, viñeta, nubes, papel, tramado de puntos y líneas, con color secundario.
+- **Estilos de movimiento** y **estilos de luz** de un clic, ajustables después.
 - Rampa de hasta 8 colores con posición, ancho (zona sólida), fusión con los vecinos y grano, independientes por color.
 - Color de fondo propio, resplandor, giro, pulso y deformación de flujo.
-- Presets: veta con corazón blanco, sol naciente, estrella, lava, aurora.
+- Presets: veta con corazón blanco, sol naciente, estrella, lava, aurora, luz entrante cálida y fría.
 - Exporta un snippet autocontenido (sin dependencias) y la configuración en JSON.
 - **Copiar ajustes / Copiar link / Pegar ajustes** para pasar un set entre personas.
 - **Deshacer / rehacer** (⌘Z / ⇧⌘Z, o Ctrl+Z / Ctrl+Y).
 - **Reubicar colores** arrastrando la manija ⋮⋮ (con vista previa de dónde cae) o con las flechas de cada color.
 - **Invertir rampa** (cambia el resultado) e **Invertir lista** (solo cambia el orden en el panel).
 - La **posición** de cada color queda acotada entre sus vecinos: nunca cambia de lugar por accidente.
-- **Favoritos** guardados en el navegador, con opción de copiarlos todos y pasarlos a otra persona.
+- **Favoritos** guardados en el navegador (renombrables con el lápiz o doble clic), con opción de copiarlos todos y pasarlos a otra persona.
 
 ## Compartir un set con otra persona
 
